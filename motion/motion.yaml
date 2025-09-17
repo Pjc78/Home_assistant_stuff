@@ -1,0 +1,228 @@
+blueprint:
+  name: Eufy Motion → Snapshot → Mobile Push
+  description: >
+    Start Eufy livestream on motion, take a snapshot, stop livestream, and
+    send the image via Home Assistant Companion app. Works with Eufy Security
+    community integration. If your camera only produces snapshots while a stream
+    is active, enable "Use RTSP livestream" or normal livestream.
+  domain: automation
+  source_url: https://example.com/blueprints/eufy_motion_snapshot  # optional
+
+  input:
+    motion_sensor:
+      name: Motion sensor
+      description: Binary sensor that turns ON when motion/person is detected
+      selector:
+        entity:
+          domain: binary_sensor
+
+    camera_entity:
+      name: Camera entity
+      selector:
+        entity:
+          domain: camera
+
+    notify_service:
+      name: Mobile notify service
+      description: >
+        Your mobile app notify service (e.g. notify.mobile_app_johns_iphone).
+        Tip: find it under Developer Tools → Services.
+      selector:
+        text:
+
+    device_serial:
+      name: Eufy device serial number
+      description: >
+        Device SN used by eufy_security services (see Settings → Devices & Services → Eufy device).
+      selector:
+        text:
+
+    use_rtsp:
+      name: Use RTSP livestream services
+      description: >
+        If ON, call eufy_security.start_rtsp_livestream/stop_rtsp_livestream.
+        If OFF, use start_livestream/stop_livestream.
+      default: true
+      selector:
+        boolean: {}
+
+    start_stop_stream:
+      name: Start/stop livestream around snapshot
+      description: >
+        Turn ON to start a livestream before snapshot and stop it afterward.
+        Some Eufy cameras need this to produce a valid frame.
+      default: true
+      selector:
+        boolean: {}
+
+    warmup_delay:
+      name: Stream warm-up delay
+      description: Time to wait after starting the stream before taking snapshot.
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 10
+          unit_of_measurement: s
+          mode: slider
+          step: 1
+
+    cooldown:
+      name: Motion cooldown (optional)
+      description: >
+        How long to wait after a trigger before allowing another snapshot/notification.
+        Leave 0 for no cooldown.
+      default: 0
+      selector:
+        duration: {}
+
+    hold_for_motion:
+      name: Require motion for at least (optional)
+      description: >
+        Only trigger if motion remains ON for this long. Leave 0 for immediate.
+      default: 0
+      selector:
+        duration: {}
+
+    snapshot_subdir:
+      name: Snapshot subfolder under /config/www
+      description: Folder will be /config/www/<this>. Make sure it exists.
+      default: snapshots
+      selector:
+        text:
+
+    filename_prefix:
+      name: Filename prefix
+      default: eufy
+      selector:
+        text:
+
+    stop_stream_after:
+      name: Stop stream after snapshot
+      description: Stop the stream after taking the snapshot (saves battery/bandwidth).
+      default: true
+      selector:
+        boolean: {}
+
+    notify_title:
+      name: Notification title
+      default: Eufy Motion Alert
+      selector:
+        text:
+
+    notify_message:
+      name: Notification message
+      default: Motion detected
+      selector:
+        text:
+
+    notify_click_action:
+      name: Notification clickAction (optional)
+      description: e.g. /lovelace/cameras
+      default: ""
+      selector:
+        text:
+
+mode: single
+max_exceeded: silent
+
+variables:
+  motion_sensor: !input motion_sensor
+  camera_entity: !input camera_entity
+  notify_service: !input notify_service
+  device_serial: !input device_serial
+  use_rtsp: !input use_rtsp
+  start_stop_stream: !input start_stop_stream
+  warmup_delay: !input warmup_delay
+  cooldown: !input cooldown
+  hold_for_motion: !input hold_for_motion
+  snapshot_subdir: !input snapshot_subdir
+  filename_prefix: !input filename_prefix
+  stop_stream_after: !input stop_stream_after
+  notify_title: !input notify_title
+  notify_message: !input notify_message
+  notify_click_action: !input notify_click_action
+
+  snapshot_dir: "/config/www/{{ snapshot_subdir }}"
+  fname: "{{ filename_prefix }}_{{ states[camera_entity].object_id }}_{{ now().strftime('%Y%m%d-%H%M%S') }}.jpg"
+  file_path: "{{ snapshot_dir ~ '/' ~ fname }}"
+  public_url: "/local/{{ snapshot_subdir }}/{{ fname }}"
+
+trigger:
+  - platform: state
+    entity_id: !input motion_sensor
+    from: "off"
+    to: "on"
+    for: !input hold_for_motion
+
+condition: []
+
+action:
+  - choose:
+      # Optional cooldown gate using an input_number-free trick: use last_triggered
+      - conditions: >
+          {{ cooldown is number and cooldown|int > 0 and
+             this.last_triggered is defined and
+             (as_timestamp(now()) - as_timestamp(this.last_triggered)) < cooldown }}
+        sequence:
+          - stop
+
+  # (Optional) Create folder first if you already have a shell_command for it.
+  # Comment this block out if you don't use it.
+  # - service: shell_command.ensure_snapshots_dir
+  #   data:
+  #     # No data required; define in configuration.yaml:
+  #     # shell_command:
+  #     #   ensure_snapshots_dir: "mkdir -p /config/www/{{ snapshot_subdir }}"
+
+  - choose:
+      - conditions: "{{ start_stop_stream }}"
+        sequence:
+          - choose:
+              - conditions: "{{ use_rtsp }}"
+                sequence:
+                  - service: eufy_security.start_rtsp_livestream
+                    data:
+                      serial_number: "{{ device_serial }}"
+              - conditions: "{{ not use_rtsp }}"
+                sequence:
+                  - service: eufy_security.start_livestream
+                    data:
+                      serial_number: "{{ device_serial }}"
+          - delay:
+              seconds: "{{ warmup_delay | int }}"
+    default: []
+
+  - service: camera.snapshot
+    data:
+      entity_id: "{{ camera_entity }}"
+      filename: "{{ file_path }}"
+
+  - choose:
+      - conditions: "{{ start_stop_stream and stop_stream_after }}"
+        sequence:
+          - choose:
+              - conditions: "{{ use_rtsp }}"
+                sequence:
+                  - service: eufy_security.stop_rtsp_livestream
+                    data:
+                      serial_number: "{{ device_serial }}"
+              - conditions: "{{ not use_rtsp }}"
+                sequence:
+                  - service: eufy_security.stop_livestream
+                    data:
+                      serial_number: "{{ device_serial }}"
+    default: []
+
+  - service: "{{ notify_service }}"
+    data:
+      title: "{{ notify_title }}"
+      message: "{{ notify_message }}"
+      data:
+        image: "{{ public_url }}"
+        {% if notify_click_action|length > 0 %}
+        clickAction: "{{ notify_click_action }}"
+        {% endif %}
+        # Example push delivery hints:
+        # ttl: 0
+        # priority: high

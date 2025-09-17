@@ -1,3 +1,143 @@
+blueprint:
+  name: Eufy Motion → Snapshot → Mobile Push
+  description: >
+    Start Eufy livestream on motion, take a snapshot, stop livestream,
+    and send the image via Home Assistant Companion app.
+    Works with the Eufy Security community integration.
+  domain: automation
+
+  input:
+    motion_sensor:
+      name: Motion sensor
+      selector:
+        entity:
+          domain: binary_sensor
+
+    camera_entity:
+      name: Camera entity
+      selector:
+        entity:
+          domain: camera
+
+    notify_service:
+      name: Mobile notify service
+      description: >
+        Your mobile app notify service (e.g. notify.mobile_app_johns_iphone).
+      selector:
+        text:
+
+    device_serial:
+      name: Eufy device serial number
+      description: >
+        Device SN used by eufy_security services.
+      selector:
+        text:
+
+    use_rtsp:
+      name: Use RTSP livestream services
+      default: true
+      selector:
+        boolean: {}
+
+    start_stop_stream:
+      name: Start/stop livestream around snapshot
+      default: true
+      selector:
+        boolean: {}
+
+    warmup_delay:
+      name: Stream warm-up delay (seconds)
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 10
+          unit_of_measurement: s
+          mode: slider
+          step: 1
+
+    cooldown:
+      name: Motion cooldown
+      default: 0
+      selector:
+        duration: {}
+
+    hold_for_motion:
+      name: Require motion for at least
+      default: 0
+      selector:
+        duration: {}
+
+    snapshot_subdir:
+      name: Snapshot subfolder under /config/www
+      default: snapshots
+      selector:
+        text:
+
+    filename_prefix:
+      name: Filename prefix
+      default: eufy
+      selector:
+        text:
+
+    stop_stream_after:
+      name: Stop stream after snapshot
+      default: true
+      selector:
+        boolean: {}
+
+    notify_title:
+      name: Notification title
+      default: Eufy Motion Alert
+      selector:
+        text:
+
+    notify_message:
+      name: Notification message
+      default: Motion detected
+      selector:
+        text:
+
+    notify_click_action:
+      name: Notification clickAction (optional)
+      default: ""
+      selector:
+        text:
+
+mode: single
+max_exceeded: silent
+
+variables:
+  motion_sensor: !input motion_sensor
+  camera_entity: !input camera_entity
+  notify_service: !input notify_service
+  device_serial: !input device_serial
+  use_rtsp: !input use_rtsp
+  start_stop_stream: !input start_stop_stream
+  warmup_delay: !input warmup_delay
+  cooldown: !input cooldown
+  hold_for_motion: !input hold_for_motion
+  snapshot_subdir: !input snapshot_subdir
+  filename_prefix: !input filename_prefix
+  stop_stream_after: !input stop_stream_after
+  notify_title: !input notify_title
+  notify_message: !input notify_message
+  notify_click_action: !input notify_click_action
+
+  snapshot_dir: "/config/www/{{ snapshot_subdir }}"
+  fname: "{{ filename_prefix }}_{{ now().strftime('%Y%m%d-%H%M%S') }}.jpg"
+  file_path: "{{ snapshot_dir ~ '/' ~ fname }}"
+  public_url: "/local/{{ snapshot_subdir }}/{{ fname }}"
+
+trigger:
+  - platform: state
+    entity_id: !input motion_sensor
+    from: "off"
+    to: "on"
+    for: !input hold_for_motion
+
+condition: []
+
 action:
   - choose:
       - conditions:

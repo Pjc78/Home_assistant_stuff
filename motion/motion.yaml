@@ -1,17 +1,14 @@
 blueprint:
   name: Eufy Motion → Snapshot → Mobile Push
   description: >
-    Start Eufy livestream on motion, take a snapshot, stop livestream, and
-    send the image via Home Assistant Companion app. Works with Eufy Security
-    community integration. If your camera only produces snapshots while a stream
-    is active, enable "Use RTSP livestream" or normal livestream.
+    Start Eufy livestream on motion, take a snapshot, stop livestream,
+    and send the image via Home Assistant Companion app.
+    Works with the Eufy Security community integration.
   domain: automation
-  source_url: https://example.com/blueprints/eufy_motion_snapshot  # optional
 
   input:
     motion_sensor:
       name: Motion sensor
-      description: Binary sensor that turns ON when motion/person is detected
       selector:
         entity:
           domain: binary_sensor
@@ -26,38 +23,30 @@ blueprint:
       name: Mobile notify service
       description: >
         Your mobile app notify service (e.g. notify.mobile_app_johns_iphone).
-        Tip: find it under Developer Tools → Services.
       selector:
         text:
 
     device_serial:
       name: Eufy device serial number
       description: >
-        Device SN used by eufy_security services (see Settings → Devices & Services → Eufy device).
+        Device SN used by eufy_security services.
       selector:
         text:
 
     use_rtsp:
       name: Use RTSP livestream services
-      description: >
-        If ON, call eufy_security.start_rtsp_livestream/stop_rtsp_livestream.
-        If OFF, use start_livestream/stop_livestream.
       default: true
       selector:
         boolean: {}
 
     start_stop_stream:
       name: Start/stop livestream around snapshot
-      description: >
-        Turn ON to start a livestream before snapshot and stop it afterward.
-        Some Eufy cameras need this to produce a valid frame.
       default: true
       selector:
         boolean: {}
 
     warmup_delay:
-      name: Stream warm-up delay
-      description: Time to wait after starting the stream before taking snapshot.
+      name: Stream warm-up delay (seconds)
       default: 2
       selector:
         number:
@@ -68,25 +57,19 @@ blueprint:
           step: 1
 
     cooldown:
-      name: Motion cooldown (optional)
-      description: >
-        How long to wait after a trigger before allowing another snapshot/notification.
-        Leave 0 for no cooldown.
+      name: Motion cooldown
       default: 0
       selector:
         duration: {}
 
     hold_for_motion:
-      name: Require motion for at least (optional)
-      description: >
-        Only trigger if motion remains ON for this long. Leave 0 for immediate.
+      name: Require motion for at least
       default: 0
       selector:
         duration: {}
 
     snapshot_subdir:
       name: Snapshot subfolder under /config/www
-      description: Folder will be /config/www/<this>. Make sure it exists.
       default: snapshots
       selector:
         text:
@@ -99,7 +82,6 @@ blueprint:
 
     stop_stream_after:
       name: Stop stream after snapshot
-      description: Stop the stream after taking the snapshot (saves battery/bandwidth).
       default: true
       selector:
         boolean: {}
@@ -118,7 +100,6 @@ blueprint:
 
     notify_click_action:
       name: Notification clickAction (optional)
-      description: e.g. /lovelace/cameras
       default: ""
       selector:
         text:
@@ -144,7 +125,7 @@ variables:
   notify_click_action: !input notify_click_action
 
   snapshot_dir: "/config/www/{{ snapshot_subdir }}"
-  fname: "{{ filename_prefix }}_{{ states[camera_entity].object_id }}_{{ now().strftime('%Y%m%d-%H%M%S') }}.jpg"
+  fname: "{{ filename_prefix }}_{{ now().strftime('%Y%m%d-%H%M%S') }}.jpg"
   file_path: "{{ snapshot_dir ~ '/' ~ fname }}"
   public_url: "/local/{{ snapshot_subdir }}/{{ fname }}"
 
@@ -159,21 +140,12 @@ condition: []
 
 action:
   - choose:
-      # Optional cooldown gate using an input_number-free trick: use last_triggered
       - conditions: >
           {{ cooldown is number and cooldown|int > 0 and
              this.last_triggered is defined and
              (as_timestamp(now()) - as_timestamp(this.last_triggered)) < cooldown }}
         sequence:
           - stop
-
-  # (Optional) Create folder first if you already have a shell_command for it.
-  # Comment this block out if you don't use it.
-  # - service: shell_command.ensure_snapshots_dir
-  #   data:
-  #     # No data required; define in configuration.yaml:
-  #     # shell_command:
-  #     #   ensure_snapshots_dir: "mkdir -p /config/www/{{ snapshot_subdir }}"
 
   - choose:
       - conditions: "{{ start_stop_stream }}"
@@ -191,7 +163,6 @@ action:
                       serial_number: "{{ device_serial }}"
           - delay:
               seconds: "{{ warmup_delay | int }}"
-    default: []
 
   - service: camera.snapshot
     data:
@@ -212,7 +183,6 @@ action:
                   - service: eufy_security.stop_livestream
                     data:
                       serial_number: "{{ device_serial }}"
-    default: []
 
   - service: "{{ notify_service }}"
     data:
@@ -220,9 +190,4 @@ action:
       message: "{{ notify_message }}"
       data:
         image: "{{ public_url }}"
-        {% if notify_click_action|length > 0 %}
-        clickAction: "{{ notify_click_action }}"
-        {% endif %}
-        # Example push delivery hints:
-        # ttl: 0
-        # priority: high
+        clickAction: "{{ notify_click_action if notify_click_action|length > 0 else '' }}"
